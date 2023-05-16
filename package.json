@@ -1,0 +1,32 @@
+{
+  "name": "analytics-api",
+  "version": "1.0.0",
+  "description": "��#\u0000 \u0000D\u0000A\u0000T\u0000A\u0000B\u0000A\u0000S\u0000E\u0000-\u0000A\u0000P\u0000I\u0000\r\u0000 \u0000",
+  "main": "app.js",
+  "scripts": {
+    "start": "nodemon app.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@electron/remote": "^2.0.9",
+    "big-json": "^3.2.0",
+    "body-parser": "^1.20.0",
+    "convert-excel-to-json": "^1.7.0",
+    "cors": "^2.8.5",
+    "csvtojson": "^2.0.10",
+    "express": "^4.18.1",
+    "express-fileupload": "^1.4.0",
+    "json-2-csv": "^3.17.2",
+    "json-stream-stringify": "^3.0.1",
+    "json2xls": "^0.1.2",
+    "mssql": "^9.1.1",
+    "mysql": "^2.18.1",
+    "nodemon": "^2.0.20",
+    "xlsx-to-json": "^0.3.0",
+    "zip-dir": "^2.0.0"
+  },
+  "devDependencies": {}
+}

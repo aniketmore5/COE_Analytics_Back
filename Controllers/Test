@@ -1,0 +1,509 @@
+const { connection } = require("../connection");
+const fs = require("fs").promises;
+const csv = require("csvtojson");
+const excelToJson = require("convert-excel-to-json");
+
+exports.getTable = async (req,res) =>{
+  const dbname = req.body.dbname;
+  const tableName = req.body.tablename;
+
+  let query = "SELECT Table_name FROM information_schema.tables WHERE TABLE_NAME = '" +
+      tableName +"' AND TABLE_SCHEMA = '" + dbname + "'";
+    
+      connection.query(query,async function(err,result){
+      
+        const db_table = result.map((r) => r["Table_name"]);
+
+        if(result){
+          res.status(200).json({ db_table, message: "Tables Found!" });
+          console.log(db_table)
+        }
+
+      })  
+}
+
+exports.createTable = async (req, res) => {
+  const dbname = req.body.dbname;
+  const tableName = req.body.tablename;
+  const userName = req.body.user;
+  let createTable = req.body.createTable;
+  const script = req.body.script;
+  let success ;
+
+  try {
+    connection.connect(async function (err) {
+
+      let query = "SELECT Table_name FROM information_schema.tables WHERE TABLE_NAME = '" +
+      tableName +"' AND TABLE_SCHEMA = '" + dbname + "'";
+    
+      connection.query(query,async function(err,result){
+      
+        const db_table = result.map((r) => r["Table_name"]);
+
+        if(createTable == 'true' ){
+
+          if(tableName == db_table ){
+        
+            success = "Failed";
+
+            description = "Table `"+ tableName +"` already exists";
+      
+            let log_query= "insert into test.upload_log(UserName,DatabaseName,TableName,Status,Description) values('"+ userName+"','"+ dbname +"','"+tableName+"','"+ success+"','" + description +"') " 
+          
+            connection.query(log_query,function(err,result){
+
+              if (err) throw err;
+            
+            })
+          
+            res.status(401).json({message:"Table '"+ tableName +"' already exists. Please change the table name"});
+
+            return;   
+          }
+        }
+  
+  
+        connection.query(script,function(err,result){
+          if(err) {
+
+            success = "Failed";
+          
+            let log_query= "insert into test.log_table(UserName,DatabaseName,TableName,Status,Description) values('"+ userName+"','"+ dbname +"','"+tableName+"','"+ success+"','" + err.sqlMessage.replaceAll("'","`") +"') " 
+          
+            connection.query(log_query,function(err,result){
+            
+              if (err) throw err;
+
+            })
+          
+            res.status(401).json({message:err.sqlMessage});
+          }
+
+          if(result){
+
+            success = "Success";
+
+            let log_query= "insert into test.log_table(UserName,DatabaseName,TableName,Status,Description) values('"+ userName+"','"+ dbname +"','"+tableName+"','"+ success+"','" + script +"') " 
+          
+            connection.query(log_query,function(err,result){
+            
+              if (err) throw err;
+
+            })
+
+            res.status(201).json({message:"Table ["+dbname+"].["+tableName+"] created successfully"});
+          }
+        })
+      });
+    })
+  } catch(error){    
+      res.status(500).json({ error, message: "Something went wrong!" });
+    }
+};
+
+
+exports.getColumns = async (req, res) => {
+  let file = req.files.file;
+  let type = file.name.split(".")[1];
+  let separator = req.body.separator;
+  let qualifier = req.body.qualifier;
+
+  if (type == "csv") {
+    let csvRow = await csv().fromString(file.data.toString());
+    json_array = csvRow;
+    json_arr = await csv().fromString(file.data.toString());
+  }
+
+  if (type == "json") {
+    json_array = JSON.parse(file.data.toString());
+    json_arr = JSON.parse(file.data);
+  }
+
+  if (type == "xlsx") {
+    await fs.writeFile("temp.xlsx", file.data);
+    json_array = excelToJson({ sourceFile: "temp.xlsx" })["Sheet 1"];
+    json_array.shift();
+    json_arr = excelToJson({ sourceFile: "temp.xlsx" })["Sheet 1"];
+  }
+
+  if (type == "txt" || type == "tsv") {
+    json_array = file.data.toString().split("\n");
+    json_array.shift();
+    json_arr = file.data.toString().split("\n");
+
+  }
+
+  let valueArray,
+    valueArrays = [];
+  for (let i in json_array) {
+    if (type == "txt" || type == "tsv") {
+      if (type == "tsv") separator = "\t";
+      valueArray = json_array[i]
+        .split(separator)
+        .map((each) => each.replaceAll(qualifier, ""));
+        file_column = json_arr[0].split(separator)
+        .toString().replaceAll(qualifier, "");
+      file_qualifier = json_arr[0].split(separator).toString().substr(0, 1);
+
+    }
+
+    if (type == "xlsx") {
+      valueArray = Object.values(json_array[i]);
+      file_column = Object.values(json_arr[0]).toString();
+    }
+
+    if (type == "json") {
+      valueArray = Object.values(json_array[i]);
+      file_column = Object.keys(json_arr[0]).toString();
+    }
+
+    if (type == "csv") {
+      valueArray = Object.values(json_array[i]);
+      file_column = Object.keys(json_arr[0])
+        .toString()
+        .replaceAll(qualifier, "");
+      file_qualifier = Object.keys(json_arr[0]).toString().substring(0, 1);
+    }
+    valueArrays.push(valueArray);
+  }
+
+  res.json({
+    columns: file_column.split(","),
+    data: valueArrays,    
+  });
+
+};
+
+
+exports.upload = async (req, res) => {
+  let file = req.files.file;
+  let type = file.name.split(".")[1];
+  let json_array;
+  let json_arr;
+  let file_column = [];
+  let table_column = [];
+  let file_qualifier;
+  let table = req.body.tablename;
+  let database = req.body.dbname;
+  let qualifier = req.body.qualifier;
+  let seperator = req.body.seperator;
+  let createTable = req.body.createTable;
+  let fieldlength = req.body.fieldlength;
+  let dataType = req.body.dataType;
+  const userName = req.body.user;
+  let description;
+
+  if (type == "csv") {
+
+    let csvRow = await csv().fromString(file.data.toString());
+
+    json_array = csvRow;
+
+    json_arr = await csv().fromString(file.data.toString());
+
+  }
+
+  if (type == "json") {
+
+    json_array = JSON.parse(file.data.toString());
+
+    json_arr = JSON.parse(file.data);
+
+  }
+
+  if (type == "xlsx") {
+
+    await fs.writeFile("temp.xlsx", file.data);
+
+    json_array = excelToJson({ sourceFile: "temp.xlsx" })["Sheet 1"];
+    json_array.shift();
+
+    json_arr = excelToJson({ sourceFile: "temp.xlsx" })["Sheet 1"];
+
+  }
+
+  if (type == "txt" || type == "tsv") {
+
+    json_array = file.data.toString().split("\n");
+    json_array.shift();
+
+    json_arr = file.data.toString().split("\n");
+
+  }
+
+  
+  let query = "SELECT Table_name FROM information_schema.tables WHERE TABLE_NAME = '" +
+  table +"' AND TABLE_SCHEMA = '" + database + "'";
+    
+  connection.query(query,async function(err,result){
+      
+    const db_table = result.map((r) => r["Table_name"]);
+
+    if(createTable == 'true' ){
+
+      if(table == db_table ){
+        
+        success = "Failed";
+
+        description = "Table `"+ table +"` already exists";
+      
+        let log_query= "insert into test.upload_log(UserName,DatabaseName,TableName,Status,Description) values('"+ userName+"','"+ database +"','"+table+"','"+ success+"','" + description +"') " 
+          
+        connection.query(log_query,function(err,result){
+
+          if (err) throw err;
+            
+        })
+          
+        res.status(401).json({message:"Table '"+ table +"' already exists. Please change the table name"});
+
+        return;   
+      }
+    }
+  
+
+    try {
+      connection.connect(async function (err) {
+      
+        table_col =
+        "SELECT * FROM information_schema.columns WHERE TABLE_NAME = '" + table +
+        "' AND TABLE_SCHEMA = '" + database + "'";
+      
+        connection.query(table_col, async function (err, result) {
+          
+          table_column = result.map((r) => r["COLUMN_NAME"])
+          .toString().split(" ").join("");
+
+          let valueArray;
+        
+          var successRecords =0;
+          var failureRecords =0;
+
+          for (let i in json_array) {
+            let count = i;
+
+            if (type == "txt" || type == "tsv") {
+
+              if (type == "tsv") seperator = "\t";
+              
+              valueArray = json_array[i].split(seperator)
+              .map((each) => each.replaceAll(qualifier, ""));
+
+              file_column = json_arr[0].split(seperator)
+              .toString().replaceAll(qualifier, "");
+
+              file_qualifier = json_arr[0].split(seperator)
+              .toString().substr(0, 1);
+            }
+
+            if (type == "xlsx") {
+
+              valueArray = Object.values(json_array[i]);
+
+              file_column = Object.values(json_arr[0]).toString();
+
+              file_qualifier=qualifier='';
+
+            }
+
+            if (type == "json") {
+
+              valueArray = Object.values(json_array[i]);
+
+              file_column = Object.keys(json_arr[0]).toString();
+
+              file_qualifier = qualifier='';
+            }
+
+            if (type == "csv") {
+
+              valueArray = Object.values(json_array[i]);
+
+              file_column = Object.keys(json_arr[0]).toString()
+              .replaceAll(qualifier, "");
+
+              file_qualifier = Object.keys(json_arr[0])
+              .toString().substring(0, 1);
+
+            }
+
+            if (table_column === file_column) {
+
+              let Values = valueArray
+              .map((value) => `'${value.toString().replaceAll(qualifier, "")}'`)
+              .join(",");
+
+              let query = `insert into ${database}.${table} Values(${Values})`;
+            
+              connection.query(query, function (err,result) {
+            
+                if (err) {
+                 
+                  error_desc= err.sqlMessage.toString().replaceAll("'","");
+              
+                  Values= Values+",'"+error_desc+"'"
+              
+                  error_file_column=file_column+",error_description";             
+              
+                  let query1=`insert into ${database}.${table}_error(`+error_file_column +`) Values(${Values})`;
+           
+                  let query2 = "insert into test.error_log(UserName,DatabaseName,TableName,FileName,ErrorDescription) values('"+ userName+"','"+ database +"','"+table+"','"+ file.name +"','" + err.toString().replaceAll("'","`") +"') " 
+
+                  connection.query(query2, function (err) {
+
+                    if(err) {
+
+                      let log_query= "insert into test.error_log(UserName,DatabaseName,TableName,FileName,ErrorDescription) values('"+ userName+"','"+ database +"','"+table+"','"+ file.name +"','" + err.toString().replaceAll("'","`") +"') "
+                                                         
+                      connection.query(log_query,function(err,result){
+                  
+                        if (err) throw err;
+
+                      })
+                   
+                    };
+
+                  }) ;  
+                
+                  failureRecords= failureRecords + 1;   
+
+                } 
+            
+                if(result){
+
+                  successRecords= successRecords + 1;
+
+                } 
+            
+                if(count == json_array.length-1){
+
+                  success = "Success";
+
+                  description = "File `"+ file.name +"` has been uploaded successfully.\n Success Records : "+ successRecords +
+                  "\n Failure Records : "+ failureRecords
+          
+                  let log_query= "insert into test.upload_log(UserName,DatabaseName,TableName,Status,Description) values('"+ userName+"','"+ database +"','"+table+"','"+ success+"','" + description +"') " 
+              
+                  connection.query(log_query,function(err,result){
+                  
+                    if (err) throw err;
+
+                  })
+
+                  res.status(201).json({message: "Success Records: "+successRecords+ "\n Failure Records: " +failureRecords});
+  
+                  return;
+                }
+              })
+            } 
+          }
+
+          console.log("File Type: " + type);
+          console.log("Table Columns: " + table_column);
+          console.log("File Columns: " + file_column);
+          console.log("File Qualifier: " + file_qualifier);
+
+          if (file_qualifier !== qualifier) {
+
+            success = "Failed";
+
+            description = "Qualifier entered does not match with file qualifier"
+      
+            let log_query= "insert into test.upload_log(UserName,DatabaseName,TableName,Status,Description) values('"+ userName+"','"+ database +"','"+table+"','"+ success+"','" + description +"') " 
+          
+            connection.query(log_query,function(err){
+
+              if (err) throw err;
+
+            })
+          
+            res.status(401).json({message:"Please Check the Qualifier entered"});
+
+            return;
+          }
+
+          if (table_column !== file_column) {
+            
+            success = "Failed";
+
+            description = "File column does not match with Database Table column"
+      
+            let log_query= "insert into test.upload_log(UserName,DatabaseName,TableName,Status,Description) values('"+ userName+"','"+ database +"','"+table+"','"+ success+"','" + description +"') " 
+          
+            connection.query(log_query,function(err){
+            
+              if (err) throw err;
+
+            })
+
+            res.status(401).json({message:"File column doesn't match with the Table column"});
+
+            return;
+          }
+
+          if(err) throw err
+
+        });
+      });
+    } 
+    
+    catch (error) {
+
+      success = "Failed";
+
+      description = error;
+      
+      let log_query= "insert into test.upload_log(UserName,DatabaseName,TableName,Status,Description) values('"+ userName+"','"+ database +"','"+table+"','"+ success+"','" + description +"') " 
+          
+      connection.query(log_query,function(err){
+
+        if (err) throw err;
+
+      })
+
+      res.status(401).json({ message: error.sqlMessage });
+    }
+  }) 
+};
+
+exports.log = async (req, res) => {
+  
+  connection.connect(function (err) {
+    
+    connection.query("select * from test.log_table", function (err, result) {
+      
+      if (err) throw err;
+
+      result = JSON.parse(JSON.stringify(result));
+
+      if (result) {
+
+        res.status(200).json({result});
+
+      }
+    });
+  });
+};
+
+exports.upload_log = async (req, res) => {
+  
+  connection.connect(function (err) {
+    
+    connection.query("select * from test.upload_log",function (err, result, fields) {
+      
+      if (err) throw err;
+
+      result = JSON.parse(JSON.stringify(result));
+
+      if (result) {
+        
+        res.status(200).json({result,});
+
+      }
+    });
+  });
+};
+
+
+
+
